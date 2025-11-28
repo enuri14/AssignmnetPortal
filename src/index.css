@@ -293,12 +293,6 @@ body {
   color: #495057;
 }
 
-/* Column widths */
-.col-assignment { width: 40%; }
-.col-course { width: 22%; color:var(--muted); font-weight:600; }
-.col-status { width: 12%; text-align:center; }
-.col-due { width:12%; color:var(--muted); }
-
 /* STATUS  */
 .status-pill {
   display:inline-block;
@@ -405,12 +399,6 @@ body {
 }
 
 /* ACTION BUTTONS */
-.drawer-actions { 
-  display:flex; 
-  gap:10px; 
-  align-items:center; 
-  margin-top:6px; 
-}
 .primary-btn, .secondary-btn {
   border-radius:8px;
   padding:10px 12px;
@@ -459,13 +447,6 @@ body {
   font-weight:700;
   font-size:12px;
 }
-
-/* Countdown style */
-.countdown {
-  color: #b44;
-  font-weight:700;
-}
-
 
 .status-pill svg, .status-pill .icon {
   margin-right:6px;
