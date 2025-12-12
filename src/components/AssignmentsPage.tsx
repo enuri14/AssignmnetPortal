@@ -8,7 +8,7 @@ const AssignmentsPage: React.FC = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>("all");
   const [search, setSearch] = useState("");
-  
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,8 +23,8 @@ const AssignmentsPage: React.FC = () => {
           fetchAssignments(),
         ]);
 
-        setCourses(coursesData);
-        setAssignments(assignmentsData);
+        setCourses(coursesData || []);
+        setAssignments(assignmentsData || []);
       } catch (err) {
         console.error(err);
         setError("Could not load assignments.");
@@ -38,34 +38,59 @@ const AssignmentsPage: React.FC = () => {
 
   const filteredAssignments = useMemo(() => {
     let list = assignments;
-    if (selectedCourseId !== "all") list = list.filter((a) => a.courseId === selectedCourseId);
+
+    // Filter by course
+    if (selectedCourseId !== "all") {
+      list = list.filter((a) => a.courseId === selectedCourseId);
+    }
+
+    // Search filter
     if (search.trim() !== "") {
       const q = search.trim().toLowerCase();
-      list = list.filter((a) => (a.title + " " + (a.shortDescription ?? "")).toLowerCase().includes(q));
+      list = list.filter((a) =>
+        ((a.title ?? "") + " " + (a.shortDescription ?? ""))
+          .toLowerCase()
+          .includes(q)
+      );
     }
+
     return list;
   }, [assignments, selectedCourseId, search]);
 
-  // Group by intakeLabel 
+  // Group by intakeLabel
   const groups = useMemo(() => {
     const map = new Map<string, Assignment[]>();
+
     filteredAssignments.forEach((a) => {
-      const key = a.intakeLabel;
+      const key = a.intakeLabel ?? "Unknown Intake";
+
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(a);
     });
+
     return Array.from(map.entries());
   }, [filteredAssignments]);
 
   function dueWithinWeek(a: Assignment) {
+    if (!a.dueDate) return false;
     const now = Date.now();
     const due = new Date(a.dueDate).getTime();
     const diff = due - now;
     return diff > 0 && diff <= 7 * 24 * 60 * 60 * 1000;
   }
 
+  function isNewAssignment(a: Assignment) {
+    if (!a.releaseDate) return false;
+    const now = Date.now();
+    const released = new Date(a.releaseDate).getTime();
+    const diff = now - released;
+    return diff >= 0 && diff <= 7 * 24 * 60 * 60 * 1000;
+  }
+
   function formatRemaining(a: Assignment) {
+    if (!a.dueDate) return "";
     const due = new Date(a.dueDate).getTime();
+
     let diff = Math.max(0, due - Date.now());
     const days = Math.floor(diff / (24 * 60 * 60 * 1000));
     diff -= days * 24 * 60 * 60 * 1000;
@@ -74,11 +99,13 @@ const AssignmentsPage: React.FC = () => {
     const minutes = Math.floor(diff / (60 * 1000));
     diff -= minutes * 60 * 1000;
     const seconds = Math.floor(diff / 1000);
+
     const parts = [];
     if (days) parts.push(`${days}d`);
     if (hours) parts.push(`${hours}h`);
     if (minutes) parts.push(`${minutes}m`);
     if (!parts.length) parts.push(`${seconds}s`);
+
     return parts.join(" ");
   }
 
@@ -91,31 +118,47 @@ const AssignmentsPage: React.FC = () => {
         </p>
       </div>
 
+
       <div className="filters-row">
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label>
-            Course:
-            <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)}>
-              <option value="all">All courses</option>
-              {courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code} – {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+      
+          <div key="course-filter">
+            <label>
+              Course:
+              <select
+                value={selectedCourseId}
+                onChange={(e) => setSelectedCourseId(e.target.value)}
+                style={{ marginLeft: 8 }}
+              >
+                <option value="all">All courses</option>
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} – {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-          <label style={{ display:'flex', alignItems:'center' }}>
-            <input
-              className="search-input"
-              placeholder="Search assignments..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ marginLeft: 8 }}
-            />
-          </label>
-
-          
+        
+          <div key="search-filter">
+            <label style={{ display: "flex", alignItems: "center" }}>
+              <input
+                className="search-input"
+                placeholder="Search assignments..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ marginLeft: 8 }}
+              />
+            </label>
+          </div>
         </div>
       </div>
 
@@ -126,7 +169,9 @@ const AssignmentsPage: React.FC = () => {
         <div className="info-box">No assignments found for this filter.</div>
       )}
 
-      {!loading && !error &&
+      {/* Grouped table */}
+      {!loading &&
+        !error &&
         groups.map(([intakeLabel, list]) => (
           <div key={intakeLabel} className="intake-group">
             <h2 className="intake-heading">{intakeLabel}</h2>
@@ -143,6 +188,7 @@ const AssignmentsPage: React.FC = () => {
                     <th></th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {list.map((a) => (
                     <tr
@@ -151,26 +197,52 @@ const AssignmentsPage: React.FC = () => {
                       onClick={() => navigate(`/assignments/${a.id}`)}
                     >
                       <td>{a.title}</td>
+
                       <td>
                         {a.courseCode ? `${a.courseCode} – ` : ""}
                         {a.courseName ?? ""}
                       </td>
+
                       <td>
-                        <span className={`status-pill status-${a.status.toLowerCase()}`}>
-                          {a.status === "Downloaded" ? "⬇️ " : a.status === "Submitted" ? "✅ " : "📤 "}
+                        <span
+                          className={`status-pill status-${(a.status ?? "")
+                            .toLowerCase()
+                            .trim()}`}
+                        >
+                          {a.status === "Downloaded"
+                            ? "⬇️ "
+                            : a.status === "Submitted"
+                            ? "✅ "
+                            : "📤 "}
                           {a.status}
                         </span>
                       </td>
+
                       <td>
                         {dueWithinWeek(a) ? (
-                          <span className="badge-due-urgent">Due in {formatRemaining(a)}</span>
+                          <span className="badge-due-urgent">
+                            Due in {formatRemaining(a)}
+                          </span>
                         ) : (
-                          new Date(a.dueDate).toLocaleDateString()
+                          (a.dueDate &&
+                            new Date(a.dueDate).toLocaleDateString()) ||
+                          "—"
                         )}
                       </td>
-                      <td className="short-desc-cell">{a.shortDescription}</td>
+
+                      <td className="short-desc-cell">
+                        {a.shortDescription ?? ""}
+                      </td>
+
                       <td>
-                        {a.feedback ? <span className="badge-feedback">Feedback available</span> : null}
+                        {a.feedback ? (
+                          <span className="badge-feedback">
+                            Feedback available
+                          </span>
+                        ) : null}
+                        {isNewAssignment(a) ? (
+                          <span className="badge-new">New</span>
+                        ) : null}
                       </td>
                     </tr>
                   ))}

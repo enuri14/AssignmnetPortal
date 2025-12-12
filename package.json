@@ -1,22 +1,31 @@
 {
   "name": "assignments-ui",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "0.1.0",
+  "description": "Assignments system UI extension for JupyterLab",
+  "keywords": ["jupyterlab", "extension"],
+  "license": "BSD-3-Clause",
+
+  "jupyterlab": {
+    "extension": true,
+    "schemaDir": "schema"
+  },
+
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build": "jlpm run build:prod",
+    "build:prod": "jupyter labextension build .",
+    "pack": "npm pack"
   },
+
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^7.9.6"
+    "@jupyterlab/application": "^4.0.0",
+    "@jupyterlab/apputils": "^4.0.0",
+    "@jupyterlab/ui-components": "^4.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
   },
+
   "devDependencies": {
-    "@types/react": "^18.2.21",
-    "@types/react-dom": "^18.2.7",
-    "typescript": "~5.9.3",
-    "vite": "^7.1.7"
+    "typescript": "~5.3.0",
+    "@jupyterlab/builder": "^4.0.0"
   }
 }

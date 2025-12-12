@@ -12,8 +12,12 @@ export async function fetchAssignments(): Promise<Assignment[]> {
   if (!res.ok) throw new Error("Failed to fetch assignments");
   const data: Assignment[] = await res.json();
 
+  // Filter out non-assignment items (e.g., user records, invalid data)
+  const validAssignments = data.filter(
+    (item) => item.status && item.courseId && item.intakeLabel && item.dueDate
+  );
   
-  return data.sort((a, b) => {
+  return validAssignments.sort((a, b) => {
     // by intake (order), then by due date
     if (a.intakeOrder !== b.intakeOrder) {
       return a.intakeOrder - b.intakeOrder;
