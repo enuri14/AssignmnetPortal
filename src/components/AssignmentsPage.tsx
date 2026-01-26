@@ -1,180 +1,140 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useHistory } from "react-router-dom";
 import type { Assignment, Course } from "../types";
 import { fetchAssignments, fetchCourses } from "../api";
 
+
+
+function getDueTime(a: Assignment): number | null {
+  if (!a.dueDate) return null;
+  const t = new Date(a.dueDate).getTime();
+  return isNaN(t) ? null : t;
+}
+
+function isDueSoon(a: Assignment) {
+  const due = getDueTime(a);
+  if (!due) return false;
+  const diff = due - Date.now();
+  return diff > 0 && diff <= 7 * 24 * 60 * 60 * 1000;
+}
+
+function isOverdue(a: Assignment) {
+  const due = getDueTime(a);
+  if (!due) return false;
+  return due < Date.now() && a.status !== "Submitted";
+}
+
+/* ---------- component ---------- */
+
 const AssignmentsPage: React.FC = () => {
+  const history = useHistory();
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState<string>("all");
+  const [selectedCourseId, setSelectedCourseId] = useState("all");
   const [search, setSearch] = useState("");
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const navigate = useNavigate();
-
   useEffect(() => {
-    async function loadData() {
+    async function load() {
       try {
         setLoading(true);
-        const [coursesData, assignmentsData] = await Promise.all([
+        const [c, a] = await Promise.all([
           fetchCourses(),
-          fetchAssignments(),
+          fetchAssignments()
         ]);
-
-        setCourses(coursesData || []);
-        setAssignments(assignmentsData || []);
-      } catch (err) {
-        console.error(err);
+        setCourses(c ?? []);
+        setAssignments(a ?? []);
+      } catch (e) {
+        console.error(e);
         setError("Could not load assignments.");
       } finally {
         setLoading(false);
       }
     }
-
-    loadData();
+    load();
   }, []);
 
-  const filteredAssignments = useMemo(() => {
+  /* ---------- filtering ---------- */
+
+  const filtered = useMemo(() => {
     let list = assignments;
 
-    // Filter by course
     if (selectedCourseId !== "all") {
-      list = list.filter((a) => a.courseId === selectedCourseId);
+      list = list.filter(a => a.courseId === selectedCourseId);
     }
 
-    // Search filter
-    if (search.trim() !== "") {
-      const q = search.trim().toLowerCase();
-      list = list.filter((a) =>
-        ((a.title ?? "") + " " + (a.shortDescription ?? ""))
-          .toLowerCase()
-          .includes(q)
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(a =>
+        `${a.title} ${a.shortDescription ?? ""}`.toLowerCase().includes(q)
       );
     }
 
     return list;
   }, [assignments, selectedCourseId, search]);
 
-  // Group by intakeLabel
-  const groups = useMemo(() => {
+  /* ---------- grouping ---------- */
+
+  const groups = useMemo<Array<[string, Assignment[]]>>(() => {
+    const hasIntake = filtered.some(a => a.intakeLabel);
+    if (!hasIntake) {
+      return [["All Assignments", filtered]];
+    }
+
     const map = new Map<string, Assignment[]>();
-
-    filteredAssignments.forEach((a) => {
-      const key = a.intakeLabel ?? "Unknown Intake";
-
+    filtered.forEach(a => {
+      const key = a.intakeLabel ?? "Other";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(a);
     });
 
     return Array.from(map.entries());
-  }, [filteredAssignments]);
+  }, [filtered]);
 
-  function dueWithinWeek(a: Assignment) {
-    if (!a.dueDate) return false;
-    const now = Date.now();
-    const due = new Date(a.dueDate).getTime();
-    const diff = due - now;
-    return diff > 0 && diff <= 7 * 24 * 60 * 60 * 1000;
-  }
-
-  function isNewAssignment(a: Assignment) {
-    if (!a.releaseDate) return false;
-    const now = Date.now();
-    const released = new Date(a.releaseDate).getTime();
-    const diff = now - released;
-    return diff >= 0 && diff <= 7 * 24 * 60 * 60 * 1000;
-  }
-
-  function formatRemaining(a: Assignment) {
-    if (!a.dueDate) return "";
-    const due = new Date(a.dueDate).getTime();
-
-    let diff = Math.max(0, due - Date.now());
-    const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-    diff -= days * 24 * 60 * 60 * 1000;
-    const hours = Math.floor(diff / (60 * 60 * 1000));
-    diff -= hours * 60 * 60 * 1000;
-    const minutes = Math.floor(diff / (60 * 1000));
-    diff -= minutes * 60 * 1000;
-    const seconds = Math.floor(diff / 1000);
-
-    const parts = [];
-    if (days) parts.push(`${days}d`);
-    if (hours) parts.push(`${hours}h`);
-    if (minutes) parts.push(`${minutes}m`);
-    if (!parts.length) parts.push(`${seconds}s`);
-
-    return parts.join(" ");
-  }
+  /* ---------- render ---------- */
 
   return (
     <section className="assignments-page">
       <div className="page-header">
-        <h1>My assignments</h1>
+        <h1>Assignment list</h1>
         <p className="page-subtitle">
-          View all released, downloaded, and submitted assignments in one place.
+          View all released, downloaded and submitted assignments.
         </p>
       </div>
 
-
       <div className="filters-row">
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-      
-          <div key="course-filter">
-            <label>
-              Course:
-              <select
-                value={selectedCourseId}
-                onChange={(e) => setSelectedCourseId(e.target.value)}
-                style={{ marginLeft: 8 }}
-              >
-                <option value="all">All courses</option>
-                {courses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code} – {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+        <label>
+          Course:
+          <select
+            value={selectedCourseId}
+            onChange={e => setSelectedCourseId(e.target.value)}
+          >
+            <option value="all">All courses</option>
+            {courses.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.code} – {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
 
-        
-          <div key="search-filter">
-            <label style={{ display: "flex", alignItems: "center" }}>
-              <input
-                className="search-input"
-                placeholder="Search assignments..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ marginLeft: 8 }}
-              />
-            </label>
-          </div>
-        </div>
+        <input
+          placeholder="Search assignments…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
       </div>
 
       {loading && <div className="info-box">Loading assignments…</div>}
       {error && <div className="info-box error">{error}</div>}
 
-      {!loading && !error && groups.length === 0 && (
-        <div className="info-box">No assignments found for this filter.</div>
-      )}
-
-      {/* Grouped table */}
       {!loading &&
         !error &&
-        groups.map(([intakeLabel, list]) => (
-          <div key={intakeLabel} className="intake-group">
-            <h2 className="intake-heading">{intakeLabel}</h2>
+        groups.map(([label, list]) => (
+          <div key={label} className="intake-group">
+            <h2 className="intake-heading">{label}</h2>
 
             <div className="table-wrapper">
               <table className="assignments-table">
@@ -184,17 +144,15 @@ const AssignmentsPage: React.FC = () => {
                     <th>Course</th>
                     <th>Status</th>
                     <th>Due</th>
-                    <th>Short info</th>
-                    <th></th>
+                    <th>Info</th>
                   </tr>
                 </thead>
-
                 <tbody>
-                  {list.map((a) => (
+                  {list.map(a => (
                     <tr
                       key={a.id}
                       className="clickable-row"
-                      onClick={() => navigate(`/assignments/${a.id}`)}
+                      onClick={() => history.push(`/assignments/${a.id}`)}
                     >
                       <td>{a.title}</td>
 
@@ -205,44 +163,30 @@ const AssignmentsPage: React.FC = () => {
 
                       <td>
                         <span
-                          className={`status-pill status-${(a.status ?? "")
-                            .toLowerCase()
-                            .trim()}`}
+                          className={`status-pill status-${a.status.toLowerCase()}`}
                         >
-                          {a.status === "Downloaded"
-                            ? "⬇️ "
-                            : a.status === "Submitted"
-                            ? "✅ "
-                            : "📤 "}
                           {a.status}
                         </span>
                       </td>
 
                       <td>
-                        {dueWithinWeek(a) ? (
-                          <span className="badge-due-urgent">
-                            Due in {formatRemaining(a)}
-                          </span>
-                        ) : (
-                          (a.dueDate &&
-                            new Date(a.dueDate).toLocaleDateString()) ||
-                          "—"
-                        )}
+                        {(() => {
+                          const due = getDueTime(a);
+                          if (!due) return "—";
+                          if (isOverdue(a))
+                            return (
+                              <span className="badge-due-urgent">Overdue</span>
+                            );
+                          if (isDueSoon(a))
+                            return (
+                              <span className="badge-due-urgent">Due soon</span>
+                            );
+                          return new Date(due).toLocaleDateString();
+                        })()}
                       </td>
 
                       <td className="short-desc-cell">
                         {a.shortDescription ?? ""}
-                      </td>
-
-                      <td>
-                        {a.feedback ? (
-                          <span className="badge-feedback">
-                            Feedback available
-                          </span>
-                        ) : null}
-                        {isNewAssignment(a) ? (
-                          <span className="badge-new">New</span>
-                        ) : null}
                       </td>
                     </tr>
                   ))}
