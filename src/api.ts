@@ -1,93 +1,167 @@
 import type { Assignment, Course } from "./types";
+import { URLExt } from "@jupyterlab/coreutils";
+import { ServerConnection } from "@jupyterlab/services";
 
 
+export async function requestAPI<T>(
+  endPoint: string = "",
+  init: RequestInit = {}
+): Promise<T> {
+
+  const settings = ServerConnection.makeSettings();
+
+  
+  const requestUrl = URLExt.join(settings.baseUrl, endPoint);
+
+  // Send request using Jupyter's internal request handler
+  const response = await ServerConnection.makeRequest(
+    requestUrl,
+    init,
+    settings
+  );
+
+ 
+  const data = await response.json();
+
+  // Throw error if request failed
+  if (!response.ok) {
+    throw new ServerConnection.ResponseError(response, data.message);
+  }
+
+  return data;
+}
+
+/* 
+   Fetch all assignments (from all courses)
+    */
 export async function fetchAssignments(): Promise<Assignment[]> {
-  /* ---------- nbgrader API ---------- */
   try {
-    const res = await fetch("/nbgrader/api/assignments");
+    //  Fetch available courses from nbgrader
+    const coursesResponse = await requestAPI<any>("courses");
 
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((a: any) => ({
-          id: a.assignment_id,
-          title: a.assignment_id,
-          shortDescription: "Released assignment",
-          status: a.submitted
-            ? "Submitted"
-            : a.downloaded
-            ? "Downloaded"
-            : "Released",
+    if (!coursesResponse.success || !Array.isArray(coursesResponse.value)) {
+      return [];
+    }
 
-          courseId: a.course_id,
-          courseCode: a.course_id,
-          courseName: a.course_id,
+    // Map used to remove duplicate assignments
+    const assignmentMap = new Map<string, Assignment>();
 
-          intakeLabel: a.course_id,
-          intakeOrder: 1,
+    // Status priority (higher value = more advanced state)
+    const STATUS_PRIORITY: Record<Assignment["status"], number> = {
+      Released: 1,
+      Downloaded: 2,
+      Submitted: 3
+    };
 
-          releaseDate: a.release_date ?? "",
-          dueDate: a.due_date ?? "",
+    // Map nbgrader status → UI-friendly status
+    const STATUS_MAP: Record<string, Assignment["status"]> = {
+      released: "Released",
+      fetched: "Downloaded",
+      submitted: "Submitted"
+    };
 
-          notebooks: [],
+    //  Fetch assignments for each course
+    for (const courseId of coursesResponse.value) {
+      // Build query parameters using dictionary
+      const queryParams = new URLSearchParams({ course_id: courseId });
 
-          submittedDate: a.submission_timestamp ?? undefined,
-          feedback: a.feedback_available ? "Feedback available" : undefined,
-          marks: a.score ?? undefined
-        }));
+      const assignmentsResponse = await requestAPI<any>(
+        `assignments?${queryParams.toString()}`
+      );
+
+      if (!assignmentsResponse.success || !Array.isArray(assignmentsResponse.value)) {
+        continue;
+      }
+
+      //  Process each assignment record
+      for (const rawAssignment of assignmentsResponse.value) {
+        const assignmentStatus =
+          STATUS_MAP[rawAssignment.status] ?? "Released";
+
+        // Unique key per course + assignment
+        const assignmentKey = `${rawAssignment.course_id}::${rawAssignment.assignment_id}`;
+        const existingAssignment = assignmentMap.get(assignmentKey);
+
+        // Keep the assignment with the most advanced status
+        if (
+          !existingAssignment ||
+          STATUS_PRIORITY[assignmentStatus] >
+            STATUS_PRIORITY[existingAssignment.status]
+        ) {
+          assignmentMap.set(assignmentKey, {
+            id: rawAssignment.assignment_id,
+            title: rawAssignment.assignment_id,
+            shortDescription: "Released assignment",
+
+            status: assignmentStatus,
+
+            courseId: rawAssignment.course_id,
+            courseCode: rawAssignment.course_id,
+            courseName: rawAssignment.course_id,
+
+            intakeLabel: rawAssignment.course_id,
+            intakeOrder: 1,
+
+            releaseDate: rawAssignment.release_date ?? "",
+            dueDate: rawAssignment.due_date ?? "",
+
+            notebooks: rawAssignment.notebooks ?? [],
+
+            submittedDate:
+              rawAssignment.submissions?.length > 0
+                ? rawAssignment.submissions[0].timestamp
+                : undefined,
+
+            feedback:
+              rawAssignment.has_exchange_feedback ||
+              rawAssignment.has_local_feedback
+                ? "Feedback available"
+                : undefined,
+
+            marks: rawAssignment.score ?? undefined
+          });
+        }
       }
     }
-  } catch {
-    
-  }
 
-  /* ---------- Fallback: released folders ---------- */
-  const res = await fetch("/api/contents/release?content=1");
-
-  if (!res.ok) {
-    console.error("Failed to fetch release directory", res.status);
+    // Convert Map → Array for UI consumption
+    return Array.from(assignmentMap.values());
+  } catch (error) {
+    console.error("Failed to fetch assignments", error);
     return [];
   }
-
-  const data = await res.json();
-
-  return (data.content || [])
-    .filter((x: any) => x.type === "directory")
-    .map((x: any) => ({
-      id: x.name,
-      title: x.name,
-      shortDescription: "Released assignment",
-      status: "Released",
-
-      courseId: "default",
-      courseCode: "MyCourse",
-      courseName: "MyCourse",
-
-      intakeLabel: "Default",
-      intakeOrder: 1,
-
-      releaseDate: "",
-      dueDate: "",
-
-      notebooks: []
-    }));
 }
 
-export async function fetchAssignmentById(id: string) {
-  const list = await fetchAssignments();
-  return list.find(a => a.id === id) ?? null;
+/* 
+   Fetch assignment by ID
+   */
+export async function fetchAssignmentById(
+  assignmentId: string
+): Promise<Assignment | null> {
+  const assignments = await fetchAssignments();
+  return assignments.find(a => a.id === assignmentId) ?? null;
 }
 
+/* 
+   Fetch courses
+   */
 export async function fetchCourses(): Promise<Course[]> {
-  return [
-    {
-      id: "default",
-      code: "MyCourse",
-      name: "MyCourse",
-      intakeLabel: "Default",
-      intakeOrder: 1
-    }
-  ];
-}
+  try {
+    const coursesResponse = await requestAPI<any>("courses");
 
-/* Tries nbgrader API first, falls back to file system if it fails. */
+    if (!coursesResponse.success || !Array.isArray(coursesResponse.value)) {
+      return [];
+    }
+
+    // Convert course IDs into Course objects
+    return coursesResponse.value.map((courseId: string) => ({
+      id: courseId,
+      code: courseId,
+      name: courseId,
+      intakeLabel: courseId,
+      intakeOrder: 1
+    }));
+  } catch {
+    return [];
+  }
+}
